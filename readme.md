@@ -191,6 +191,8 @@ The Gradle plugin `io.papermc.hangar-publish-plugin` needs to applied before app
 
 You need to set the `MOD_UPDATE_API_KEY` environment variable to be able to upload updates.
 
+You can change the mod upload url by changing `mod_update_url`. Defaults to `https://update.leialoha.dev/`.
+
 The Gradle plugin `mod-update` needs to applied before applying this script.
 
 

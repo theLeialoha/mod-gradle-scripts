@@ -10,9 +10,10 @@ def PAPER_LOADER = 'paper'
 
 def DEFAULT_JAVA_VERSION = '17'
 def DEFAULT_MOD_LOADER = FABRIC_MOD_LOADER
-def DEFAULT_MOD_AUTHOR = 'Max Henkel'
+def DEFAULT_MOD_AUTHOR = 'Leialoha'
 def DEFAULT_RELEASE_TYPE = 'alpha'
-def DEFAULT_MINECRAFT_USER_NAME_PREFIX = 'henkelmax'
+def DEFAULT_MINECRAFT_USER_NAME_PREFIX = 'leialoha'
+def DEFAULT_MOD_UPDATE_URL = 'https://update.leialoha.dev/'
 
 def DEFAULT_CONFIGBUILDER_VERSION = '2.0.1'
 def DEFAULT_FABRIC_LOADER_VERSION = '0.15.1'
@@ -40,6 +41,7 @@ ext.java_version = getOrDefault('java_version', DEFAULT_JAVA_VERSION) as int
 ext.mod_loader = getOrDefault('mod_loader', DEFAULT_MOD_LOADER)
 ext.mod_authors = getOrDefault('mod_authors', [DEFAULT_MOD_AUTHOR], it -> stringToStringList(it))
 ext.minecraft_user_name_prefix = getOrDefault('minecraft_user_name_prefix', DEFAULT_MINECRAFT_USER_NAME_PREFIX)
+ext.mod_update_url = getOrDefault('mod_update_url', DEFAULT_MOD_UPDATE_URL)
 ext.random_minecraft_user_name = getOrDefault('random_minecraft_user_name', true, it -> it.toBoolean())
 ext.include_mixins = getOrDefault('include_mixins', true, it -> it.toBoolean()) //TODO Maybe only for Forge/NeoForge, since they are included by default from Fabric
 ext.use_mixins = getOrDefault('use_mixins', false, it -> it.toBoolean()) //TODO Maybe only for Forge/NeoForge, since they are included by default from Fabric
@@ -833,7 +835,7 @@ if (enable_mod_update) {
     def changelog = getChangelogFile()
     modUpdate {
         apiKey = mod_update_api_key
-        serverURL = 'https://update.maxhenkel.de/'
+        serverURL = mod_update_url
         modID = mod_id
         gameVersion = minecraft_version
         modLoader = mod_loader
