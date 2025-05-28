@@ -44,6 +44,7 @@ apply from: "https://raw.githubusercontent.com/henkelmax/mod-gradle-scripts/${mo
 | `included_projects`          | The subprojects that should be included in the project                                                                                                            | Comma separated `String` list | *Empty list*                       |                                                           | `:common`     |
 | `use_shadow`                 | Whether to use shadow                                                                                                                                             | `boolean`                     | `true`                             |                                                           |               |
 | `enable_configbuilder`       | Whether config builder should be included in the project. Also shades the library if `use_shadow` is enabled                                                      | `boolean`                     | `false`                            |                                                           |               |
+| `configbuilder_version`      | The version of config builder that should be included in the project. Only applicable if `enable_configbuilder` is `true`                                         | `String`                      | `2.0.2`                            |                                                           |               |
 
 
 **If `use_shadow` is active**
@@ -63,7 +64,8 @@ The Gradle plugin `fabric-loom` needs to applied before applying this script.
 | `fabric_api_version`          | The Fabric API version. Required if `included_fabric_api_modules` is set or `import_fabric_api` is enabled | `String`                      |               |                 | `0.91.3+1.20.4`                          |
 | `enable_accesswideners`       | If access wideners should be enabled. Uses `${mod_id}.accesswidener` as name                               | `boolean`                     | `false`       |                 |                                          |
 | `add_quilt_supported_tag`     | If quilt should be marked as supported when uploading the mod                                              | `boolean`                     | `true`        |                 |                                          |
-| `parchment_mappings`          | The parchment mappings (None if not provided)                                                              | `String`                      |               |                 | `parchment-1.21:2024.07.28`              |
+| `fabric_mappings`             | The Fabric mappings (Official mappings if not provided)                                                    | `String`                      |               |                 | `net.fabricmc:yarn:1.20.1+build.10`      |
+| `parchment_mappings`          | The parchment mappings (None if not provided - only applies if `fabric_mappings` is not set)               | `String`                      |               |                 | `parchment-1.21:2024.07.28`              |
 
 
 **If `mod_loader` `quilt` is used**
@@ -191,9 +193,11 @@ The Gradle plugin `io.papermc.hangar-publish-plugin` needs to applied before app
 
 You need to set the `MOD_UPDATE_API_KEY` environment variable to be able to upload updates.
 
-You can change the mod upload url by changing `mod_update_url`. Defaults to `https://update.leialoha.dev/`.
-
 The Gradle plugin `mod-update` needs to applied before applying this script.
+
+| Property         | Description                       | Type     | Default Value                  | Possible Values | Example |
+| ---------------- | --------------------------------- | -------- | ------------------------------ | --------------- | ------- |
+| `mod_update_url` | The URL of the mod update server  | `String` | `https://update.leialoha.dev/` |                 |         |
 
 
 ## `taskutils.gradle`
