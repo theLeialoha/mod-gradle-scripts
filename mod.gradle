@@ -1,5 +1,5 @@
 // Constants
-def MIN_GRADLE_VERSION = '8.5'
+def MIN_GRADLE_VERSION = '8.14.3'
 def FABRIC_MOD_LOADER = 'fabric'
 def QUILT_MOD_LOADER = 'quilt'
 def NEOFORGE_MOD_LOADER = 'neoforge'
@@ -15,6 +15,7 @@ def DEFAULT_MINECRAFT_USER_NAME_PREFIX = 'leialoha'
 def DEFAULT_MOD_UPDATE_URL = 'https://update.leialoha.dev/'
 
 def DEFAULT_CONFIGBUILDER_VERSION = '2.0.2'
+//TODO Fail if not explicitly set
 def DEFAULT_FABRIC_LOADER_VERSION = '0.15.1'
 def DEFAULT_MIXIN_ANNOTATION_PROCESSOR_VERSION = '0.8.4'
 
@@ -64,8 +65,21 @@ ext.is_forge = mod_loader.equalsIgnoreCase(FORGE_MOD_LOADER)
 ext.is_bukkit = mod_loader.equalsIgnoreCase(BUKKIT_LOADER)
 ext.is_paper = mod_loader.equalsIgnoreCase(PAPER_LOADER)
 
+// Check if shadow is plugin is present
+if (use_shadow) {
+    checkPlugin('com.gradleup.shadow')
+}
+
 // Fabric specific variables
 if (is_fabric) {
+    if (hasPlugin('net.fabricmc.fabric-loom')) {
+        ext.remap_fabric = false
+    } else if (hasPlugin('net.fabricmc.fabric-loom-remap') || hasPlugin('fabric-loom')) {
+        ext.remap_fabric = true
+    } else {
+        throw new RuntimeException("Missing plugin 'net.fabricmc.fabric-loom' or 'net.fabricmc.fabric-loom-remap'")
+    }
+
     ext.fabric_loader_version = getOrDefault('fabric_loader_version', DEFAULT_FABRIC_LOADER_VERSION)
     ext.included_fabric_api_modules = getOrDefault('included_fabric_api_modules', [], it -> stringToStringList(it))
     ext.import_fabric_api = getOrDefault('import_fabric_api', false, it -> it.toBoolean())
@@ -82,6 +96,7 @@ if (is_fabric) {
 
 // Quilt specific variables
 if (is_quilt) {
+    checkPlugin('org.quiltmc.loom')
     checkProperty('quilt_loader_version')
     // TODO Add access widener path to quilt.mod.json
     ext.enable_accesswideners = getOrDefault('enable_accesswideners', false, it -> it.toBoolean())
@@ -89,11 +104,13 @@ if (is_quilt) {
 
 // Neoforge specific variables
 if (is_neoforge) {
+    checkPlugin('net.neoforged.moddev')
     checkProperty('neoforge_version')
 }
 
 // Forge specific variables
 if (is_forge) {
+    checkPlugin('net.minecraftforge.gradle')
     checkProperty('forge_version')
     ext.mixin_annotation_processor_version = getOrDefault('mixin_annotation_processor_version', DEFAULT_MIXIN_ANNOTATION_PROCESSOR_VERSION)
     // Merge the resources and classes into the same directory
@@ -101,14 +118,30 @@ if (is_forge) {
     // Defaults to official mappings if not present
     ext.forge_mappings_channel = getOrDefault('forge_mappings_channel', 'official')
     ext.forge_mappings_version = getOrDefault('forge_mappings_version', minecraft_version)
-    ext.reobfuscate = getOrDefault('reobfuscate', true, it -> it.toBoolean())
-    if (!reobfuscate) {
+    def needs_reobf = !satisfiesVersion(minecraft_version, '1.20.2')
+    ext.legacy_forge = getOrDefault('legacy_forge', needs_reobf, it -> it.toBoolean())
+    if (project.hasProperty('reobfuscate')) {
+        throw new RuntimeException('Property "reobfuscate" is not required anymore')
+    }
+    ext.reobfuscate = needs_reobf
+    if (legacy_forge && !reobfuscate) {
         minecraft.reobf = false
+    }
+    if (legacy_forge && include_mixins) {
+        // Mixin
+        checkPlugin('org.spongepowered.mixin')
     }
 }
 
 if (is_neoforge || is_forge) {
+    // TODO Automatically detect the accesstransformer file
     ext.enable_accesstransformers = getOrDefault('enable_accesstransformers', false, it -> it.toBoolean())
+}
+
+if (is_forge) {
+    if (enable_accesstransformers && !legacy_forge) {
+        checkPlugin('net.minecraftforge.accesstransformers')
+    }
 }
 
 if (is_bukkit) {
@@ -116,6 +149,7 @@ if (is_bukkit) {
 }
 
 if (is_paper) {
+    checkPlugin('io.papermc.paperweight.userdev')
     checkProperty('paper_version')
 }
 
@@ -125,7 +159,7 @@ ext.upload_recommended = getOrDefault('upload_recommended', false, it -> it.toBo
 // CurseForge upload
 ext.enable_curseforge_upload = getOrDefault('enable_curseforge_upload', true, it -> it.toBoolean())
 if (enable_curseforge_upload) {
-    checkPlugin('com.matthewprenger.cursegradle')
+    checkPlugin('de.maxhenkel.cursegradle')
     checkProperty('curseforge_upload_id')
     ext.curseforge_upload_include_prefix = getOrDefault('curseforge_upload_include_prefix', true, it -> it.toBoolean())
     ext.curseforge_upload_minecraft_versions = getOrDefault('curseforge_upload_minecraft_versions', [], it -> stringToStringList(it))
@@ -135,7 +169,7 @@ if (enable_curseforge_upload) {
 // CurseForge Bukkit upload
 ext.enable_curseforge_bukkit_upload = getOrDefault('enable_curseforge_bukkit_upload', false, it -> it.toBoolean())
 if (enable_curseforge_bukkit_upload) {
-    checkPlugin('info.u_team.curse_gradle_uploader')
+    checkPlugin('de.maxhenkel.cursegradle')
     checkProperty('curseforge_bukkit_upload_id')
     ext.curseforge_bukkit_upload_minecraft_versions = getOrDefault('curseforge_bukkit_upload_minecraft_versions', [], it -> stringToStringList(it))
 }
@@ -191,37 +225,13 @@ included_projects.forEach({
     evaluationDependsOn(it)
 })
 
-// Checking if mandatory plugins exist
-if (is_fabric) {
-    checkPlugin('fabric-loom')
-}
-if (is_quilt) {
-    checkPlugin('org.quiltmc.loom')
-}
-if (is_neoforge) {
-    // Neoforge gradle
-    checkPlugin('net.neoforged.gradle.userdev')
-    // Neoforge mixins
-    checkPlugin('net.neoforged.gradle.mixin')
-}
-if (is_forge) {
-    // Forge gradle
-    checkPlugin('net.minecraftforge.gradle')
-    if (include_mixins) {
-        // Mixin
-        checkPlugin('org.spongepowered.mixin')
-    }
-}
-if (is_paper) {
-    checkPlugin('io.papermc.paperweight.userdev')
-}
-
-if (use_shadow) {
-    checkPlugin('com.github.johnrengelman.shadow')
-}
-
 apply plugin: 'java'
 apply plugin: 'idea'
+
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'idea'
+}
 
 idea {
     module {
@@ -230,21 +240,21 @@ idea {
     }
 }
 
-subprojects {
-    apply plugin: 'java'
-    apply plugin: 'idea'
+java {
+    def java_language_version = JavaLanguageVersion.of(java_version)
+    sourceCompatibility = java_language_version
+    targetCompatibility = java_language_version
 }
-
-def java_language_version = JavaLanguageVersion.of(java_version)
-sourceCompatibility = java_language_version
-targetCompatibility = java_language_version
 
 if (hasProperty('java_toolchain_version')) {
     java.toolchain.languageVersion = JavaLanguageVersion.of(getProperty('java_toolchain_version') as int)
 }
 
+base {
+    archivesName = getOrDefault('archives_base_name', "${mod_id.replaceAll('_', '-')}-${mod_loader}")
+}
+
 group = getOrDefault('maven_group', "de.maxhenkel.${mod_id.replaceAll('_', '')}")
-archivesBaseName = getOrDefault('archives_base_name', "${mod_id.replaceAll('_', '-')}-${mod_loader}")
 version = mod_version
 
 // Run configurations
@@ -264,7 +274,6 @@ if (is_fabric) {
         }
     }
 
-
     // Access widener
     def accesswidenerFile = file("src/main/resources/${mod_id}.accesswidener")
     if (enable_accesswideners && accesswidenerFile.exists()) {
@@ -277,12 +286,16 @@ if (is_fabric) {
 // Quilt run configuration
 if (is_quilt) {
     if (random_minecraft_user_name) {
-        runClient.doFirst {
-            args = ['--username', "${minecraft_user_name_prefix}${new Random().nextInt(1000)}"]
+        tasks.named('runClient', JavaExec) {
+            doFirst {
+                args = ['--username', "${minecraft_user_name_prefix}${new Random().nextInt(1000)}"]
+            }
         }
     } else {
-        runClient.doFirst {
-            args = ['--username', "${minecraft_user_name_prefix}"]
+        tasks.named('runClient', JavaExec) {
+            doFirst {
+                args = ['--username', "${minecraft_user_name_prefix}"]
+            }
         }
     }
 
@@ -301,40 +314,55 @@ if (is_neoforge) {
     configurations {
         minecraftLibrary {}
         implementation.extendsFrom minecraftLibrary
-    }
 
-    runs {
-        configureEach {
-            modSource project.sourceSets.main
-            systemProperty 'forge.logging.console.level', 'debug'
-            dependencies {
-                runtime project.configurations.minecraftLibrary
+        // ModClassLoader requires this for < 1.21.9.
+        // ModDevGradle disallows it for >= 1.21.9.
+        if (!satisfiesVersion(minecraft_version, '1.21.9')) {
+            matching { it.name == 'additionalRuntimeClasspath' }.configureEach {
+                extendsFrom minecraftLibrary
             }
         }
-        client {
-            workingDirectory file('run')
-            if (random_minecraft_user_name) {
-                arguments = ['--username', "${minecraft_user_name_prefix}${new Random().nextInt(1000)}"]
-            } else {
-                arguments = ['--username', "${minecraft_user_name_prefix}"]
+    }
+
+    neoForge {
+        version = neoforge_version
+        validateAccessTransformers = true
+
+        runs {
+            configureEach {
+                logLevel = org.slf4j.event.Level.DEBUG
+            }
+
+            client {
+                client()
+                gameDirectory = file('run')
+                if (random_minecraft_user_name) {
+                    programArguments = ['--username', "${minecraft_user_name_prefix}${new Random().nextInt(1000)}"]
+                } else {
+                    programArguments = ['--username', "${minecraft_user_name_prefix}"]
+                }
+            }
+
+            server {
+                server()
+                programArgument '--nogui'
+                gameDirectory = file('run/server')
             }
         }
-        server {
-            workingDirectory file('run/server')
-            arguments = ['--nogui']
+
+        mods {
+            "${mod_id}" {
+                sourceSet(sourceSets.main)
+
+                included_projects.forEach({
+                    sourceSet project(it).sourceSets.main
+                })
+            }
         }
-    }
 
-    sourceSets.main.resources { srcDir 'src/generated/resources' }
-
-    if (use_mixins) {
-        mixin {
-            config "${mod_id}.mixins.json"
+        if (enable_accesstransformers) {
+            accessTransformers.from "src/main/resources/META-INF/accesstransformer.cfg"
         }
-    }
-
-    if (enable_accesstransformers) {
-        minecraft.accessTransformers.file file('src/main/resources/META-INF/accesstransformer.cfg')
     }
 }
 
@@ -342,16 +370,43 @@ if (is_neoforge) {
 if (is_forge) {
     minecraft {
         mappings channel: forge_mappings_channel, version: forge_mappings_version
-        copyIdeResources = true
+        if (legacy_forge) {
+            copyIdeResources = true
+        }
+        //TODO Use this instead of "enable_accesstransformers"
+        /*def at = file('src/main/resources/META-INF/accesstransformer.cfg')
+        if (at.exists()) {
+            accessTransformer = at
+        }*/
         if (enable_accesstransformers) {
-            accessTransformer = file('src/main/resources/META-INF/accesstransformer.cfg')
+            if (legacy_forge) {
+                accessTransformer = file('src/main/resources/META-INF/accesstransformer.cfg')
+            } else {
+                //accessTransformers(true)
+                accessTransformers {
+                    accessTransformers = "META-INF/accesstransformer.cfg"
+                }
+            }
         }
         runs {
-            configureEach {
-                property 'forge.logging.console.level', 'debug'
+            if (legacy_forge) {
+                configureEach {
+                    property 'forge.logging.console.level', 'debug'
+                }
+            } else {
+                if (use_mixins) {
+                    configureEach {
+                        args "-mixin.config=${mod_id}.mixins.json"
+                    }
+                }
             }
             client {
-                workingDirectory file('run')
+                if (legacy_forge) {
+                    workingDirectory file('run')
+                } else {
+                    workingDir = file('run')
+                }
+
                 if (random_minecraft_user_name) {
                     args = ['--username', "${minecraft_user_name_prefix}${new Random().nextInt(1000)}"]
                 } else {
@@ -359,19 +414,28 @@ if (is_forge) {
                 }
             }
             server {
-                workingDirectory file('run/server')
-                arg '--nogui'
+                if (legacy_forge) {
+                    workingDirectory file('run/server')
+                } else {
+                    workingDir = file('run/server')
+                }
+                args = ['--nogui']
             }
             data {
-                workingDirectory file('run')
-                args '--mod', mod_id, '--all', '--output', file('src/generated/resources/')
+                if (legacy_forge) {
+                    workingDirectory file('run')
+                    args '--mod', mod_id, '--all', '--output', file('src/generated/resources/')
+                } else {
+                    workingDir = file('run')
+                    args '--mod', mod_id, '--all', '--output', file('src/generated/resources/'), '--existing', file('src/main/resources/')
+                }
             }
         }
     }
 
-    sourceSets.main.resources { srcDir 'src/generated/resources' }
+    sourceSets.main.resources.srcDir 'src/generated/resources'
 
-    if (use_mixins) {
+    if (legacy_forge && use_mixins) {
         mixin {
             add sourceSets.main, "${mod_id}.refmap.json"
         }
@@ -383,6 +447,12 @@ if (is_forge) {
         it.output.resourcesDir = dir
         it.java.destinationDirectory = dir
     }*/
+    if (!legacy_forge) {
+        configurations {
+            minecraftLibrary {}
+            implementation.extendsFrom minecraftLibrary
+        }
+    }
 }
 
 // Dependency management
@@ -397,32 +467,56 @@ repositories {
     if (is_fabric) {
         maven { url = 'https://maven.parchmentmc.org/' }
     }
+    if (!is_bukkit) {
+        maven { url = 'https://libraries.minecraft.net' }
+    }
+    if (is_forge && !legacy_forge) {
+        maven minecraft.mavenizer
+        maven fg.forgeMaven
+        maven fg.minecraftLibsMaven
+    }
     mavenLocal()
 }
 
 dependencies {
     if (is_fabric) {
         minecraft "com.mojang:minecraft:${minecraft_version}"
-        if (fabric_mappings != null) {
-            mappings "${fabric_mappings}"
-        } else {
-            if (parchment_mappings != null) {
-                mappings loom.layered() {
-                    officialMojangMappings()
-                    parchment("org.parchmentmc.data:${parchment_mappings}@zip")
-                }
+        // Mappings
+        if (remap_fabric) {
+            if (fabric_mappings != null) {
+                mappings "${fabric_mappings}"
             } else {
-                mappings loom.officialMojangMappings()
-            }
+                if (parchment_mappings != null) {
+                    mappings loom.layered() {
+                        officialMojangMappings()
+                        parchment("org.parchmentmc.data:${parchment_mappings}@zip")
+                    }
+                } else {
+                    mappings loom.officialMojangMappings()
+                }
 
+            }
         }
-        modImplementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
+        // Fabric Loader
+        if (remap_fabric) {
+            modImplementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
+        } else {
+            implementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
+        }
         // Fabric API
         included_fabric_api_modules.forEach {
-            include(modImplementation(fabricApi.module(it, fabric_api_version)))
+            if (remap_fabric) {
+                include(modImplementation(fabricApi.module(it, fabric_api_version)))
+            } else {
+                include(implementation(fabricApi.module(it, fabric_api_version)))
+            }
         }
         if (import_fabric_api) {
-            modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_api_version}"
+            if (remap_fabric) {
+                modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_api_version}"
+            } else {
+                implementation "net.fabricmc.fabric-api:fabric-api:${fabric_api_version}"
+            }
         }
     }
 
@@ -432,19 +526,19 @@ dependencies {
         modImplementation("org.quiltmc:quilt-loader:${quilt_loader_version}")
     }
 
-    if (is_neoforge) {
-        implementation "net.neoforged:neoforge:${neoforge_version}"
-    }
-
     if (is_forge) {
-        minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
-        if (include_mixins) {
-            annotationProcessor "org.spongepowered:mixin:${mixin_annotation_processor_version}:processor"
+        if (legacy_forge) {
+            minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+            if (include_mixins) {
+                annotationProcessor "org.spongepowered:mixin:${mixin_annotation_processor_version}:processor"
+            }
+        } else {
+            implementation minecraft.dependency("net.minecraftforge:forge:${minecraft_version}-${forge_version}")
         }
     }
 
     if (is_bukkit) {
-        implementation "org.bukkit:craftbukkit:${bukkit_version}"
+        implementation "org.bukkit:bukkit:${bukkit_version}"
     }
 
     if (is_paper) {
@@ -494,14 +588,6 @@ tasks.withType(JavaCompile).configureEach {
     }
 }
 
-if (is_neoforge) {
-    tasks.withType(JavaCompile).matching(it -> !it.name.startsWith("neo")).configureEach {
-        included_projects.forEach({
-            source(project(it).sourceSets.main.allSource)
-        })
-    }
-}
-
 processResources {
     included_projects.forEach({
         from("${project(it).projectDir}/src/main/resources")
@@ -510,24 +596,10 @@ processResources {
 
 jar {
     from('LICENSE') {
-        rename { "${it}_${archivesBaseName}" }
+        rename { "${it}_${base.archivesName}" }
     }
 
     // Manifest attributes
-
-    // This does not seem to be needed anymore with NeoForge, but we will still add it for now
-    if (is_neoforge) {
-        manifest {
-            attributes(['Specification-Title'     : mod_display_name,
-                        'Specification-Vendor'    : mod_authors.join(', '),
-                        'Specification-Version'   : '1',
-                        'Implementation-Title'    : mod_display_name,
-                        'Implementation-Version'  : mod_version,
-                        'Implementation-Vendor'   : mod_authors.join(', '),
-                        'Implementation-Timestamp': new Date().format("yyyy-MM-dd'T'HH:mm:ssZ"),])
-        }
-    }
-
     if (is_forge) {
         def attrs = [
                 'Specification-Title'     : mod_display_name,
@@ -546,7 +618,7 @@ jar {
         manifest {
             attributes(attrs)
         }
-        if (minecraft.reobf) {
+        if (legacy_forge && minecraft.reobf) {
             finalizedBy 'reobfJar'
         }
     }
@@ -554,11 +626,29 @@ jar {
 
 if (use_shadow) {
     shadowJar {
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
         configurations = [project.configurations.shadow]
-        if (is_fabric || is_quilt) {
+        if (is_quilt || (is_fabric && remap_fabric)) {
             archiveClassifier = 'shadow-dev'
         } else {
             archiveClassifier = ''
+        }
+        if (is_fabric && !remap_fabric) {
+            // For non-remapped Fabric, we need to take the normal jar as base,
+            // since Fabric now adds the include(...) jars in the jar task
+            jar {
+                archiveClassifier = 'dev'
+            }
+            archiveClassifier = ''
+            dependsOn tasks.jar
+            from(zipTree(tasks.jar.archiveFile))
+            def resourcesOutputDir = sourceSets.main.output.resourcesDir
+            exclude { FileTreeElement details ->
+                return details.file.absolutePath.startsWith(resourcesOutputDir.absolutePath)
+            }
+            doLast {
+                delete tasks.jar.archiveFile
+            }
         }
         if (enable_configbuilder) {
             relocate 'de.maxhenkel.configbuilder', "de.maxhenkel.${mod_id}.configbuilder"
@@ -566,7 +656,18 @@ if (use_shadow) {
     }
 }
 
-if (use_shadow && (is_fabric || is_quilt)) {
+if (is_fabric && use_shadow) {
+    if (remap_fabric) {
+        remapJar {
+            dependsOn shadowJar
+            inputFile = shadowJar.archiveFile.get()
+        }
+    } else {
+        assemble.dependsOn('shadowJar')
+    }
+}
+
+if (is_quilt && use_shadow) {
     remapJar {
         dependsOn shadowJar
         inputFile = shadowJar.archiveFile.get()
@@ -581,7 +682,7 @@ if (is_neoforge) {
 
 if (is_forge) {
     if (use_shadow) {
-        if (minecraft.reobf) {
+        if (legacy_forge && minecraft.reobf) {
             shadowJar.dependsOn('reobfJar')
             reobf {
                 shadowJar {}
@@ -613,31 +714,6 @@ afterEvaluate {
 
         }
     }
-}
-
-// NeoForge clean fix
-if (is_neoforge) {
-    // https://github.com/neoforged/NeoGradle/issues/18#issuecomment-1858754401
-    tasks.register('customClean', Delete) {
-        doLast {
-            def files = []
-            fileTree("build")
-                    .exclude('**/expanded.lock')
-                    .visit { FileVisitDetails fvd ->
-                        files << fvd.file
-                    }
-            files.reverse()
-                    .each { f ->
-                        def file = file(f)
-                        if (!file.exists()) return;
-                        if ((file.isDirectory() && file.list().size() == 0)
-                                || !file.isDirectory())
-                            delete f
-                    }
-        }
-    }
-    clean.dependsOn customClean
-    clean.enabled = false
 }
 
 // CurseForge Upload
@@ -843,6 +919,12 @@ if (enable_mod_update) {
     }
 }
 
+tasks.withType(AbstractTestTask).configureEach {
+    if (it.metaClass.getMetaProperty('failOnNoDiscoveredTests')) {
+        it.failOnNoDiscoveredTests = false
+    }
+}
+
 // Utility functions
 /**
  * Checks if a property exists or falls back to a default value.
@@ -880,7 +962,14 @@ def checkPlugin(String pluginName) {
     }
 }
 
-static def stringToStringList(String str) {
+static def stringToStringList(Object value) {
+    if (!(value instanceof String)) {
+        return value
+    }
+    String str = value
+    if (str.isBlank()) {
+        return []
+    }
     return str.split(',').collect({ it.trim() })
 }
 
@@ -893,7 +982,38 @@ def getChangelogFile() {
 }
 
 def getUploadArtefact() {
-    return (is_fabric || is_quilt) ? remapJar : (use_shadow ? shadowJar : jar)
+    if (is_quilt) {
+        return remapJar;
+    }
+    if (is_fabric && remap_fabric) {
+        return remapJar;
+    }
+    return use_shadow ? shadowJar : jar
+}
+
+/**
+ * Checks if a version satisfies another version.
+ * Note that this doesnt check any pre-release versions or release candidates.
+ * <code>1.2.3-rc1</code> is treated as <code>1.2.3</code>.
+ *
+ * @param actual the version to check
+ * @param expected the minimum required version
+ * @return true if the version satisfies the expected version
+ */
+static boolean satisfiesVersion(String actual, String expected) {
+    List<Integer> actualParts = actual.split('-', 2)[0].tokenize('.').collect { it.toInteger() }
+    List<Integer> expectedParts = expected.split('-', 2)[0].tokenize('.').collect { it.toInteger() }
+    int maxLength = Math.max(actualParts.size(), expectedParts.size())
+    for (int i = 0; i < maxLength; i++) {
+        int actualPart = i < actualParts.size() ? actualParts.get(i) : 0
+        int expectedPart = i < expectedParts.size() ? expectedParts.get(i) : 0
+        if (actualPart < expectedPart) {
+            return false
+        } else if (actualPart > expectedPart) {
+            return true
+        }
+    }
+    return true
 }
 
 static boolean satisfiesVersion(String actual, String expected) {

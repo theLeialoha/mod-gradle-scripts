@@ -9,13 +9,13 @@ This script simplifies the configuration of a mod development environment includ
 
 This script supports:
 
-- Fabric Loom `1.4+`
-- Quilt Loom `1.4+`
-- NeoGradle `7.0+`
-- ForgeGradle `6.0+`
-- Paperweight `1.7.7+`
+- Fabric Loom `1.13+`
+- Quilt Loom `1.8+`
+- NeoGradle `7.+`
+- ForgeGradle `6.+`
+- Paperweight `2.0.+`
 
-Gradle version `8.5+` is required.
+Gradle version `9+` is recommended but `8.14.3+` works as well.
 
 ### Usage
 
@@ -49,23 +49,23 @@ apply from: "https://raw.githubusercontent.com/henkelmax/mod-gradle-scripts/${mo
 
 **If `use_shadow` is active**
 
-The Gradle plugin `com.github.johnrengelman.shadow` needs to applied before applying this script.
+The Gradle plugin `com.gradleup.shadow` needs to applied before applying this script.
 
 
 **If `mod_loader` `fabric` is used**
 
-The Gradle plugin `fabric-loom` needs to applied before applying this script.
+The Gradle plugin `net.fabricmc.fabric-loom`, `net.fabricmc.fabric-loom-remap` or `fabric-loom` needs to applied before applying this script.
 
-| Property                      | Description                                                                                                | Type                          | Default Value | Possible Values | Example                                  |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------- | --------------- | ---------------------------------------- |
-| `fabric_loader_version`       | The Fabric Loader version                                                                                  | `String`                      | `0.15.1`      |                 |                                          |
-| `included_fabric_api_modules` | The Fabric API modules that should be included in the project                                              | Comma separated `String` list | *Empty list*  |                 | `fabric-api-base, fabric-command-api-v2` |
-| `import_fabric_api`           | Whether Fabric API should be available in development and the Minecraft runtime                            | `boolean`                     | `false`       |                 |                                          |
-| `fabric_api_version`          | The Fabric API version. Required if `included_fabric_api_modules` is set or `import_fabric_api` is enabled | `String`                      |               |                 | `0.91.3+1.20.4`                          |
-| `enable_accesswideners`       | If access wideners should be enabled. Uses `${mod_id}.accesswidener` as name                               | `boolean`                     | `false`       |                 |                                          |
-| `add_quilt_supported_tag`     | If quilt should be marked as supported when uploading the mod                                              | `boolean`                     | `true`        |                 |                                          |
-| `fabric_mappings`             | The Fabric mappings (Official mappings if not provided)                                                    | `String`                      |               |                 | `net.fabricmc:yarn:1.20.1+build.10`      |
-| `parchment_mappings`          | The parchment mappings (None if not provided - only applies if `fabric_mappings` is not set)               | `String`                      |               |                 | `parchment-1.21:2024.07.28`              |
+| Property                      | Description                                                                                                          | Type                          | Default Value | Possible Values | Example                                  |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------- | --------------- | ---------------------------------------- |
+| `fabric_loader_version`       | The Fabric Loader version                                                                                            | `String`                      | `0.15.1`      |                 |                                          |
+| `included_fabric_api_modules` | The Fabric API modules that should be included in the project                                                        | Comma separated `String` list | *Empty list*  |                 | `fabric-api-base, fabric-command-api-v2` |
+| `import_fabric_api`           | Whether Fabric API should be available in development and the Minecraft runtime                                      | `boolean`                     | `false`       |                 |                                          |
+| `fabric_api_version`          | The Fabric API version. Required if `included_fabric_api_modules` is set or `import_fabric_api` is enabled           | `String`                      |               |                 | `0.91.3+1.20.4`                          |
+| `enable_accesswideners`       | If access wideners should be enabled. Uses `${mod_id}.accesswidener` as name                                         | `boolean`                     | `false`       |                 |                                          |
+| `add_quilt_supported_tag`     | If quilt should be marked as supported when uploading the mod                                                        | `boolean`                     | `true`        |                 |                                          |
+| `fabric_mappings`             | The Fabric mappings (Official mappings if not provided) - Has no effect when using an unobfuscated Minecraft version | `String`                      |               |                 | `net.fabricmc:yarn:1.20.1+build.10`      |
+| `parchment_mappings`          | The parchment mappings (None if not provided - only applies if `fabric_mappings` is not set)                         | `String`                      |               |                 | `parchment-1.21:2024.07.28`              |
 
 
 **If `mod_loader` `quilt` is used**
@@ -92,18 +92,19 @@ The Gradle plugins `net.neoforged.gradle.userdev` and `net.neoforged.gradle.mixi
 
 The Gradle plugin `net.minecraftforge.gradle` needs to applied before applying this script.
 
-Additionally the plugin `org.spongepowered.mixin` needs to be applied if `include_mixins` is enabled.
+Additionally the plugin `org.spongepowered.mixin` needs to be applied if `include_mixins` is enabled (`legacy_forge` only).
+Additionally the plugin `net.minecraftforge.accesstransformers` needs to be applied if `enable_accesstransformers` is enabled (non-`legacy_forge` only).
 
-| Property                             | Description                                                                               | Type      | Default Value                            | Possible Values | Example                                  |
-| ------------------------------------ | ----------------------------------------------------------------------------------------- | --------- | ---------------------------------------- | --------------- | ---------------------------------------- |
-| `forge_version`                      | The Forge version                                                                         | `String`  | *This field is required to be set*       |                 | `48.0.1`                                 |
-| `mixin_annotation_processor_version` | The version of the Mixin annotation processor                                             | `String`  | `0.8.4`                                  |                 |                                          |
-| `mixin_connector_path`               | The path to the Mixin connector. Required if using Minecraft versions older than `1.20.6` | `String`  |                                          |                 | `de.maxhenkel.examplemod.MixinConnector` |
-| `merge_files`                        | Whether to combine all classes and resources                                              | `boolean` | `true`                                   |                 |                                          |
-| `forge_mappings_channel`             | The mappings channel                                                                      | `String`  | `official`                               |                 |                                          |
-| `forge_mappings_version`             | The mappings version                                                                      | `String`  | The `minecraft_version` that was defined |                 |                                          |
-| `enable_accesstransformers`          | If access transformers should be enabled. Uses `META-INF/accesstransformer.cfg` as path   | `boolean` | `false`                                  |                 |                                          |
-| `reobfuscate`                        | Whether to reobfuscate the mod (Set this to `false` starting with `1.20.5`)               | `boolean` | `true`                                   |                 |                                          |
+| Property                             | Description                                                                               | Type      | Default Value                              | Possible Values | Example                                  |
+| ------------------------------------ | ----------------------------------------------------------------------------------------- | --------- | ------------------------------------------ | --------------- | ---------------------------------------- |
+| `forge_version`                      | The Forge version                                                                         | `String`  | *This field is required to be set*         |                 | `48.0.1`                                 |
+| `mixin_annotation_processor_version` | The version of the Mixin annotation processor                                             | `String`  | `0.8.4`                                    |                 |                                          |
+| `mixin_connector_path`               | The path to the Mixin connector. Required if using Minecraft versions older than `1.20.6` | `String`  |                                            |                 | `de.maxhenkel.examplemod.MixinConnector` |
+| `merge_files`                        | Whether to combine all classes and resources                                              | `boolean` | `true`                                     |                 |                                          |
+| `forge_mappings_channel`             | The mappings channel                                                                      | `String`  | `official`                                 |                 |                                          |
+| `forge_mappings_version`             | The mappings version                                                                      | `String`  | The `minecraft_version` that was defined   |                 |                                          |
+| `enable_accesstransformers`          | If access transformers should be enabled. Uses `META-INF/accesstransformer.cfg` as path   | `boolean` | `false`                                    |                 |                                          |
+| `legacy_forge`                       | Whether to use Forgegradle 6                                                              | `boolean` | `true` if `minecraft_version` is `<1.20.2` |                 |                                          |
 
 
 **If `mod_loader` `bukkit` is used**
@@ -136,7 +137,7 @@ Additionally the plugin `org.spongepowered.mixin` needs to be applied if `includ
 
 You need to set the `CURSEFORGE_API_KEY` environment variable to be able to upload mods.
 
-The Gradle plugin `com.matthewprenger.cursegradle` needs to applied before applying this script.
+The Gradle plugin `de.maxhenkel.cursegradle` (See [this](https://github.com/henkelmax/curse-gradle)) needs to applied before applying this script.
 
 | Property                                  | Description                                                                                       | Type                          | Default Value                            | Possible Values | Example            |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------- | ---------------------------------------- | --------------- | ------------------ |
@@ -151,7 +152,7 @@ The Gradle plugin `com.matthewprenger.cursegradle` needs to applied before apply
 
 You need to set the `CURSEFORGE_API_KEY` environment variable to be able to upload plugins.
 
-The Gradle plugin `info.u_team.curse_gradle_uploader` needs to applied before applying this script.
+The Gradle plugin `de.maxhenkel.cursegradle` needs to applied before applying this script.
 
 | Property                                      | Description                             | Type                          | Default Value                      | Possible Values | Example                |
 | --------------------------------------------- | --------------------------------------- | ----------------------------- | ---------------------------------- | --------------- | ---------------------- |

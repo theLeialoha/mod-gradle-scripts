@@ -1,14 +1,32 @@
-def runCommand(String commandName, boolean ignoreExitCode, String... commands) {
-    def osName = System.getProperty("os.name")
-    if (!osName.toLowerCase().contains("windows")) {
-        throw new RuntimeException('This task only works on Windows')
-    }
+import javax.inject.Inject
+
+interface InjectedExecOps {
+    @Inject ExecOperations getExecOps()
+}
+
+def runCommand(String commandName, boolean ignoreExitCode, File workDir, String... commands) {
+    def osName = System.getProperty("os.name").toLowerCase()
     def args = []
-    args.add('cmd')
-    args.add('/c')
+    if (osName.contains("windows")) {
+        args.add('cmd')
+        args.add('/c')
+    } else {
+        args.add('bash')
+        args.add('-c')
+    }
     args.addAll(commands)
-    printGreen("Executing '{}'", commandName)
-    def result = exec {
+
+    if (workDir != null) {
+        printGreen("Executing '{}' in {}", commandName, workDir)
+    } else {
+        printGreen("Executing '{}'", commandName)
+    }
+
+    def execOps = project.objects.newInstance(InjectedExecOps).execOps
+    def result = execOps.exec {
+        if (workDir != null) {
+            workingDir = workDir
+        }
         commandLine args
         ignoreExitValue ignoreExitCode
     }
@@ -50,8 +68,10 @@ def runGradleTasks(List<String> mandatoryTasks, List<String> optionalTasks) {
     }
 }
 
-def runGradleTask(String taskName, boolean ignoreExitCode) {
-    return runCommand(taskName, ignoreExitCode, 'gradlew', taskName)
+def runGradleTask(String taskName, boolean ignoreExitCode, File workDir=null) {
+    def osName = System.getProperty("os.name").toLowerCase()
+    def gradlewCmd = osName.contains("windows") ? "gradlew.bat" : "./gradlew"
+    return runCommand(taskName, ignoreExitCode, workDir, "${gradlewCmd} ${taskName}")
 }
 
 def printGreen(String template, Object... args) {
@@ -64,10 +84,10 @@ ext.runGradleTasks = { List<String> mandatoryTasks, List<String> optionalTasks -
     runGradleTasks(mandatoryTasks, optionalTasks)
 }
 
-ext.runGradleTask = { String taskName, boolean ignoreExitCode ->
-    runGradleTask(taskName, ignoreExitCode)
+ext.runGradleTask = { String taskName, boolean ignoreExitCode, File workDir=null ->
+    runGradleTask(taskName, ignoreExitCode, workDir)
 }
 
-ext.runCommand = { String commandName, boolean ignoreExitCode, String... commands ->
-    runCommand(commandName, ignoreExitCode, commands)
+ext.runCommand = { String commandName, boolean ignoreExitCode, File workDir, String... commands ->
+    runCommand(commandName, ignoreExitCode, workDir, commands)
 }
