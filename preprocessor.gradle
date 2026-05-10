@@ -1,0 +1,306 @@
+// Constants
+def FABRIC_MOD_LOADER = 'FABRIC';
+def QUILT_MOD_LOADER = 'QUILT';
+def NEOFORGE_MOD_LOADER = 'NEOFORGE';
+def FORGE_MOD_LOADER = 'FORGE';
+def BUKKIT_LOADER = 'BUKKIT';
+def PAPER_LOADER = 'PAPER';
+
+def LOADERS = [
+    FABRIC_MOD_LOADER,
+    QUILT_MOD_LOADER,
+    NEOFORGE_MOD_LOADER,
+    FORGE_MOD_LOADER,
+    BUKKIT_LOADER,
+    PAPER_LOADER
+] as Set
+
+def DEFAULT_JAVA_VERSION = '17';
+def DEFAULT_MOD_LOADER = FABRIC_MOD_LOADER;
+
+
+
+ext.minecraft_version = resolveProperty('minecraft_version');
+ext.mod_loader = getOrDefault('mod_loader', DEFAULT_MOD_LOADER);
+
+
+// VERSION MODEL
+
+class McVersion implements Comparable<McVersion> {
+    int major, minor, patch;
+
+    McVersion(int major, int minor, int patch = 0) {
+        this.major = major
+        this.minor = minor
+        this.patch = patch
+    }
+
+    static McVersion parse(String v) {
+        def parts = v.split("\\.")
+        return new McVersion(
+                parts.size() > 0 ? parts[0].toInteger() : 0,
+                parts.size() > 1 ? parts[1].toInteger() : 0,
+                parts.size() > 2 ? parts[2].toInteger() : 0
+        )
+    }
+
+    int compareTo(McVersion o) {
+        if (major != o.major) return major <=> o.major
+        if (minor != o.minor) return minor <=> o.minor
+        return patch <=> o.patch
+    }
+
+    String toString() {
+        return "${major}.${minor}.${patch}"
+    }
+}
+
+// TOKENIZER
+
+class Token {
+    static class Ident { String v }
+    static class Op { String v }
+
+    static class LParen {}
+    static class RParen {}
+    static class And {}
+    static class Or {}
+    static class Not {}
+}
+
+// LEXER
+
+def tokenize(String input) {
+    def tokens = []
+
+    def parts = input
+            .replace("(", " ( ")
+            .replace(")", " ) ")
+            .split(/\s+/)
+            .findAll { it }
+
+    parts.each { p ->
+        switch (p) {
+            case "(": tokens << new Token.LParen(); break
+            case ")": tokens << new Token.RParen(); break
+            case "&&": tokens << new Token.And(); break
+            case "||": tokens << new Token.Or(); break
+            case "!": tokens << new Token.Not(); break
+            case [">", "<", ">=", "<=", "=="]:
+                tokens << new Token.Op(v: p); break
+            default: tokens << new Token.Ident(v: p)
+        }
+    }
+
+    return tokens
+}
+
+// AST
+
+interface Expr {}
+
+class And implements Expr { Expr l, r }
+class Or implements Expr { Expr l, r }
+class Not implements Expr { Expr e }
+
+class Platform implements Expr { String name }
+class VersionCmp implements Expr { String op; McVersion v }
+
+class TrueExpr implements Expr {}
+class FalseExpr implements Expr {}
+
+// PARSER
+class Parser {
+    List tokens
+    int i = 0
+
+    Parser(tokens) { this.tokens = tokens }
+
+    def consume() { tokens[i++] }
+    def peek() { i < tokens.size() ? tokens[i] : null }
+    def match(Class t) { t.isInstance(peek()) ? consume(): null }
+
+    Expr parse() { parseOr() }
+
+    Expr parseOr() {
+        def left = parseAnd();
+        while (match(Token.Or))
+            left = new Or(l: left, r: parseAnd());
+
+        return left;
+    }
+
+    Expr parseAnd() {
+        def left = parseNot();
+        while (match(Token.And))
+            left = new And(l: left, r: parseNot())
+
+        return left;
+    }
+
+    Expr parseNot() {
+        return match(Token.Not)
+            ? new Not(e: parseNot())
+            : parseAtom();
+    }
+
+    Expr parseAtom() {
+        def t = consume();
+
+        if (t instanceof Token.Ident)
+            return parseIdent(t.v);
+
+        if (t instanceof Token.LParen) {
+            def e = parse();
+            consume();
+            return e;
+        }
+
+        throw new RuntimeException("Unexpected token: $t");
+    }
+
+    Expr parseIdent(String v) {
+        switch (v) {
+            case "true":
+                return new TrueExpr()
+
+            case "false":
+                return new FalseExpr()
+
+            case { LOADERS.contains(it) }:
+                return new Platform(name: v)
+
+            case "MC":
+                return parseVersion()
+
+            default:
+                throw new RuntimeException("Unknown ident $v")
+        }
+    }
+
+    Expr parseVersion() {
+        new VersionCmp(
+            op: consume().v,
+            v: McVersion.parse(consume().v)
+        )
+    }
+}
+
+// EVALUATOR
+
+def evalExpr(expr, McVersion mc, String platform) {
+
+    switch (expr) {
+        case TrueExpr:
+            return true
+
+        case FalseExpr:
+            return false
+
+        case Platform:
+            return expr.name == platform
+
+        case And:
+            return evalExpr(expr.l, mc, platform) &&
+                   evalExpr(expr.r, mc, platform)
+
+        case Or:
+            return evalExpr(expr.l, mc, platform) ||
+                   evalExpr(expr.r, mc, platform)
+
+        case Not:
+            return !evalExpr(expr.e, mc, platform)
+
+        case VersionCmp:
+            switch (expr.op) {
+                case ">":  return mc > expr.v
+                case ">=": return mc >= expr.v
+                case "<":  return mc < expr.v
+                case "<=": return mc <= expr.v
+                case "==": return mc == expr.v
+            }
+            return false
+    }
+
+    false
+}
+
+// PREPROCESSOR CORE
+
+def shouldInclude(String expr, McVersion mc, String platform) {
+    def ast = new Parser(tokenize(expr)).parse()
+    return evalExpr(ast, mc, platform)
+}
+
+def preprocess(String input, McVersion mc, String platform) {
+    def skip = []
+    def out = []
+
+    input.eachLine { line ->
+        def t = line.trim()
+
+        switch (true) {
+            case t.startsWith("//#if"):
+                def expr = t.substring(4).trim()
+                skip << !shouldInclude(expr, mc, platform)
+                return
+
+            case t.startsWith("//#else"):
+                if (skip) skip[-1] = !skip[-1]
+                return
+
+            case t.startsWith("//#endif"):
+                if (skip) skip.removeLast()
+                return
+        }
+
+        if (!skip.contains(true))
+            out << line
+    }
+
+    out.join("\n")
+}
+
+// GRADLE TASK
+
+tasks.register("preprocessSources") {
+    def inDir = file("src/main/java")
+    def outDir = file("$buildDir/generated/preprocessed/java")
+
+    inputs.dir(inDir)
+    outputs.dir(outDir)
+
+    doLast {
+        outDir.deleteDir()
+        outDir.mkdirs()
+
+        def mc = McVersion.parse(minecraft_version)
+
+        inDir.eachFileRecurse { f ->
+            if (f.name.endsWith(".java")) {
+                def out = new File(outDir, f.path - inDir.path)
+                out.parentFile.mkdirs()
+                out.text = preprocess(f.text, mc, mod_loader)
+            }
+        }
+    }
+}
+
+sourceSets.main.java.srcDir "$buildDir/src/generated/preprocessed/java"
+
+tasks.compileJava.dependsOn preprocessSources
+
+
+
+// Utility functions
+
+def <T> T getOrDefault(String propertyName, T defaultValue = null, Closure mutator = { it }) {
+    return (project.hasProperty(propertyName))
+        ? mutator(getProperty(propertyName))
+        : defaultValue;
+}
+
+def resolveProperty(String propertyName) {
+    if (project.hasProperty(propertyName)) return getProperty(propertyName);
+    throw new RuntimeException("No property '${propertyName}' defined");
+}
