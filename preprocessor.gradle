@@ -18,10 +18,11 @@ def LOADERS = [
 def DEFAULT_JAVA_VERSION = '17';
 def DEFAULT_MOD_LOADER = FABRIC_MOD_LOADER;
 
-
-
 ext.minecraft_version = resolveProperty('minecraft_version');
-ext.mod_loader = getOrDefault('mod_loader', DEFAULT_MOD_LOADER);
+ext.modLoader = getOrDefault('mod_loader', DEFAULT_MOD_LOADER) { it.toString().toUpperCase() }
+
+println "Minecraft Version: " + ext.minecraft_version
+println "Mod Loader: " + ext.modLoader
 
 
 // VERSION MODEL
@@ -109,12 +110,23 @@ class VersionCmp implements Expr { String op; McVersion v }
 class TrueExpr implements Expr {}
 class FalseExpr implements Expr {}
 
+// GROUP STATES
+class BlockState {
+    boolean parentActive = true;
+    boolean active = true;
+    boolean seenTrue = false;
+}
+
 // PARSER
 class Parser {
-    List tokens
-    int i = 0
+    Set loaders;
+    List tokens;
+    int i = 0;
 
-    Parser(tokens) { this.tokens = tokens }
+    Parser(tokens, loaders) {
+        this.tokens = tokens;
+        this.loaders = loaders;
+    }
 
     def consume() { tokens[i++] }
     def peek() { i < tokens.size() ? tokens[i] : null }
@@ -167,7 +179,7 @@ class Parser {
             case "false":
                 return new FalseExpr()
 
-            case { LOADERS.contains(it) }:
+            case { loaders.contains(it) }:
                 return new Platform(name: v)
 
             case "MC":
@@ -198,7 +210,7 @@ def evalExpr(expr, McVersion mc, String platform) {
             return false
 
         case Platform:
-            return expr.name == platform
+            return expr.name.equalsIgnoreCase(platform);
 
         case And:
             return evalExpr(expr.l, mc, platform) &&
@@ -227,38 +239,61 @@ def evalExpr(expr, McVersion mc, String platform) {
 
 // PREPROCESSOR CORE
 
-def shouldInclude(String expr, McVersion mc, String platform) {
-    def ast = new Parser(tokenize(expr)).parse()
+def shouldInclude(String expr, McVersion mc, String platform, Set loaders) {
+    def ast = new Parser(tokenize(expr), loaders).parse()
     return evalExpr(ast, mc, platform)
 }
 
-def preprocess(String input, McVersion mc, String platform) {
+def preprocess(String input, McVersion mc, String platform, Set loaders) {
     def skip = []
     def out = []
 
     input.eachLine { line ->
-        def t = line.trim()
+        def t = line.trim();
+        def current = skip ? skip[-1] : null;
 
         switch (true) {
             case t.startsWith("//#if"):
-                def expr = t.substring(4).trim()
-                skip << !shouldInclude(expr, mc, platform)
-                return
+                def expr = t.replaceFirst("^//#if\\s*", "");
+                boolean result = shouldInclude(expr, mc, platform, loaders);
+                def parentActive = current ? current.active : true
+
+                skip << new BlockState(
+                    parentActive: parentActive,
+                    active: parentActive && result,
+                    seenTrue: result
+                );
+                return;
+
+            case t.startsWith("//#elseif"):
+                if (!current) throw new RuntimeException("elseif without if");
+                if (current.seenTrue) { current.active = false; return; }
+                def expr = t.replaceFirst("^//#elseif\\s*", "");
+
+                boolean result = shouldInclude(expr, mc, platform, loaders);
+                current.active = current.parentActive && result;
+                current.seenTrue = result;
+                return;
 
             case t.startsWith("//#else"):
-                if (skip) skip[-1] = !skip[-1]
-                return
+                if (!current) throw new RuntimeException("else without if");
+                current.active = current.parentActive && !current.seenTrue
+                current.seenTrue = true
+                return;
 
             case t.startsWith("//#endif"):
-                if (skip) skip.removeLast()
-                return
+                if (!current) throw new RuntimeException("endif without if");
+                skip.removeLast();
+                return;
         }
 
-        if (!skip.contains(true))
-            out << line
+        if (current == null || current.active)
+            out << ( t.startsWith("//#/")
+                ? line.replaceFirst("^(\\s*)//#/\\s?", '$1')
+                : line );
     }
 
-    out.join("\n")
+    return out.join("\n");
 }
 
 // GRADLE TASK
@@ -280,7 +315,7 @@ tasks.register("preprocessSources") {
             if (f.name.endsWith(".java")) {
                 def out = new File(outDir, f.path - inDir.path)
                 out.parentFile.mkdirs()
-                out.text = preprocess(f.text, mc, mod_loader)
+                out.text = preprocess(f.text, mc, mod_loader, LOADERS)
             }
         }
     }
