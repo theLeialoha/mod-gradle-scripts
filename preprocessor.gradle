@@ -1,12 +1,15 @@
-// Constants
-def FABRIC_MOD_LOADER = 'FABRIC';
-def QUILT_MOD_LOADER = 'QUILT';
-def NEOFORGE_MOD_LOADER = 'NEOFORGE';
-def FORGE_MOD_LOADER = 'FORGE';
-def BUKKIT_LOADER = 'BUKKIT';
-def PAPER_LOADER = 'PAPER';
+import org.gradle.api.Project
+import org.gradle.api.attributes.Attribute
 
-def LOADERS = [
+// Constants
+ext.FABRIC_MOD_LOADER = 'FABRIC';
+ext.QUILT_MOD_LOADER = 'QUILT';
+ext.NEOFORGE_MOD_LOADER = 'NEOFORGE';
+ext.FORGE_MOD_LOADER = 'FORGE';
+ext.BUKKIT_LOADER = 'BUKKIT';
+ext.PAPER_LOADER = 'PAPER';
+
+ext.LOADERS = [
     FABRIC_MOD_LOADER,
     QUILT_MOD_LOADER,
     NEOFORGE_MOD_LOADER,
@@ -15,15 +18,15 @@ def LOADERS = [
     PAPER_LOADER
 ] as Set
 
-def DEFAULT_JAVA_VERSION = '17';
-def DEFAULT_MOD_LOADER = FABRIC_MOD_LOADER;
+ext.DEFAULT_JAVA_VERSION = '17';
+ext.DEFAULT_MOD_LOADER = FABRIC_MOD_LOADER;
 
+ext.process_all_loaders = getOrDefault('process_all_loaders', "false").equalsIgnoreCase("true");
 ext.minecraft_version = resolveProperty('minecraft_version');
-ext.modLoader = getOrDefault('mod_loader', DEFAULT_MOD_LOADER) { it.toString().toUpperCase() }
 
 println "Minecraft Version: " + ext.minecraft_version
-println "Mod Loader: " + ext.modLoader
 
+// ext.mod_loader = getOrDefault('mod_loader', DEFAULT_MOD_LOADER) { it.toString().toUpperCase() }
 
 // VERSION MODEL
 
@@ -298,44 +301,119 @@ def preprocess(String input, McVersion mc, String platform, Set loaders) {
 
 // GRADLE TASK
 
-tasks.register("preprocessSources") {
-    def inDir = file("src/main/java")
-    def outDir = file("$buildDir/generated/preprocessed/java")
+def LOADER_ATTRIBUTE = Attribute.of("loader", String);
 
-    inputs.dir(inDir)
-    outputs.dir(outDir)
+def preprocessTasks = []
 
-    doLast {
-        outDir.deleteDir()
-        outDir.mkdirs()
+for (loader in LOADERS) {
+    def shouldCreate = process_all_loaders || loader == mod_loader;
+    if (!shouldCreate) continue;
 
-        def mc = McVersion.parse(minecraft_version)
+    println "Creating loader task: $loader"
 
-        inDir.eachFileRecurse { f ->
-            if (f.name.endsWith(".java")) {
-                def out = new File(outDir, f.path - inDir.path)
-                out.parentFile.mkdirs()
-                out.text = preprocess(f.text, mc, mod_loader, LOADERS)
+    def platform = loader.toLowerCase();
+    def taskName = "preprocess${platform.capitalize()}"
+    def outDir = layout.buildDirectory.dir("generated/$platform")
+
+    def taskProvider = tasks.register(taskName) {
+        def inDir = file("src/main/java");
+
+        group = "preprocessing";
+
+        inputs.dir(inDir);
+        inputs.property("loader", platform);
+        outputs.dir(outDir);
+
+        doLast {
+            def outputDir = outDir.get().asFile;
+
+            delete(outputDir);
+            outputDir.mkdirs();
+
+            def mc = McVersion.parse(minecraft_version);
+
+            inDir.eachFileRecurse { f ->
+                if (!f.name.endsWith(".java")) return;
+                def out = new File(outputDir, f.path - inDir.path);
+                out.parentFile.mkdirs();
+
+                out.text = preprocess(f.text, mc, platform, LOADERS);
             }
         }
     }
+
+    // Add the created task to depend on later
+    preprocessTasks << taskProvider;
+
+    // Create the configuration
+    def cfgName = "${platform}Elements";
+    def cfg = configurations.maybeCreate(cfgName)
+
+    cfg.canBeConsumed = true;
+    cfg.canBeResolved = false;
+    cfg.attributes.attribute(LOADER_ATTRIBUTE, platform);
+
+    artifacts.add(cfgName, taskProvider) {
+        builtBy taskProvider
+    }
 }
 
-sourceSets.main.java.srcDir "$buildDir/src/generated/preprocessed/java"
 
-tasks.compileJava.dependsOn preprocessSources
+// sourceSets.main.java.srcDir "$buildDir/src/generated/preprocessed/java"
 
+tasks.named("compileJava") {
+    dependsOn(preprocessTasks)
+}
 
+// gradle.projectsEvaluated {
+//     rootProject.subprojects.configureEach { Project p ->
+//         if (!p.hasProperty("mod_loader")) return;
+//         def loader = p.property("mod_loader")?.toString()?.toUpperCase();
+
+//         if (!LOADERS.contains(loader))
+//             throw new GradleException("${p.path}: invalid mod_loader '$loader'");
+
+//         p.configurations.configureEach { cfg ->
+//             if (cfg.canBeResolved) cfg.attributes.attribute(LOADER_ATTRIBUTE, loader);
+//         }
+//     }
+// }
+
+// dependencies {
+//     attributesSchema {
+//         attribute(LOADER_ATTRIBUTE);
+//     }
+// }
+
+// if (!process_all_loaders) {
+//     configurations.configureEach { cfg ->
+//         if (!cfg.canBeResolved) return;
+//         cfg.attributes.attribute(LOADER_ATTRIBUTE, mod_loader);
+//     }
+// }
+
+configurations.configureEach { cfg ->
+    if (!cfg.canBeResolved) return;
+    if (!process_all_loaders)
+        cfg.attributes.attribute(LOADER_ATTRIBUTE, resolveLoader());
+}
 
 // Utility functions
 
-def <T> T getOrDefault(String propertyName, T defaultValue = null, Closure mutator = { it }) {
-    return (project.hasProperty(propertyName))
-        ? mutator(getProperty(propertyName))
-        : defaultValue;
+def <T> T getOrDefault(String propertyName, T defaultValue = null, Project target = project, Closure mutator = { it }) {
+    return (target.hasProperty(propertyName)) ? mutator(target.getProperty(propertyName)) : defaultValue;
 }
 
-def resolveProperty(String propertyName) {
-    if (project.hasProperty(propertyName)) return getProperty(propertyName);
+def resolveProperty(String propertyName, Project target = project) {
+    if (target.hasProperty(propertyName)) return target.getProperty(propertyName);
     throw new RuntimeException("No property '${propertyName}' defined");
+}
+
+def resolveLoader(Project p = project) {
+    def loader = getOrDefault("mod_loader", p.ext.DEFAULT_MOD_LOADER, p) { it.toString().toUpperCase() };
+
+    if (!p.ext.LOADERS.contains(loader))
+        throw new GradleException("Invalid mod_loader: $loader");
+
+    return loader;
 }
